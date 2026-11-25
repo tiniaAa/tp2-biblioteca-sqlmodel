@@ -1,9 +1,12 @@
 from datetime import date, timedelta
 from typing import Optional
 from fastapi import HTTPException, status
-from sqlmodel import Session, select
+from sqlmodel import Session
 
-from models.entities import Libro, Prestamo, PrestamoCreate, Socio
+from models.entities import Prestamo, PrestamoCreate
+from repositories import libros as repo_libros
+from repositories import prestamos as repo_prestamos
+from repositories import socios as repo_socios
 
 
 def registrar_prestamo(
@@ -14,7 +17,7 @@ def registrar_prestamo(
     hoy = fecha_hoy if fecha_hoy is not None else date.today()
 
     # Regla 7: Recurso inexistente (Socio)
-    socio = session.get(Socio, datos.socio_id)
+    socio = repo_socios.get_by_id(session, datos.socio_id)
     if not socio:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
@@ -29,11 +32,7 @@ def registrar_prestamo(
         )
 
     # Regla 1: Un socio no puede tener más de 3 préstamos activos (409)
-    query_activos = select(Prestamo).where(
-        Prestamo.socio_id == datos.socio_id,
-        Prestamo.fecha_devolucion == None,  # noqa: E711
-    )
-    prestamos_activos = session.exec(query_activos).all()
+    prestamos_activos = repo_prestamos.get_activos_by_socio(session, datos.socio_id)
     if len(prestamos_activos) >= 3:
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT,
@@ -41,7 +40,7 @@ def registrar_prestamo(
         )
 
     # Regla 7: Recurso inexistente (Libro)
-    libro = session.get(Libro, datos.libro_id)
+    libro = repo_libros.get_by_id(session, datos.libro_id)
     if not libro:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
@@ -58,22 +57,17 @@ def registrar_prestamo(
     # Regla 4: El plazo es de 14 días (fecha_vencimiento = fecha_prestamo + 14 días)
     vencimiento = hoy + timedelta(days=14)
 
-    # Descontar stock
+    # Descontar stock usando repo_libros
     libro.stock -= 1
-    session.add(libro)
+    repo_libros.save(session, libro)
 
-    prestamo = Prestamo(
+    return repo_prestamos.create(
+        session=session,
         socio_id=datos.socio_id,
         libro_id=datos.libro_id,
         fecha_prestamo=hoy,
         fecha_vencimiento=vencimiento,
-        fecha_devolucion=None,
-        multa=0.0,
     )
-    session.add(prestamo)
-    session.commit()
-    session.refresh(prestamo)
-    return prestamo
 
 
 def registrar_devolucion(
@@ -84,7 +78,7 @@ def registrar_devolucion(
     hoy = fecha_hoy if fecha_hoy is not None else date.today()
 
     # Regla 7: Recurso inexistente (Préstamo)
-    prestamo = session.get(Prestamo, prestamo_id)
+    prestamo = repo_prestamos.get_by_id(session, prestamo_id)
     if not prestamo:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
@@ -110,12 +104,9 @@ def registrar_devolucion(
     prestamo.multa = multa
 
     # Reponer stock del libro
-    libro = session.get(Libro, prestamo.libro_id)
+    libro = repo_libros.get_by_id(session, prestamo.libro_id)
     if libro:
         libro.stock += 1
-        session.add(libro)
+        repo_libros.save(session, libro)
 
-    session.add(prestamo)
-    session.commit()
-    session.refresh(prestamo)
-    return prestamo
+    return repo_prestamos.save(session, prestamo)
