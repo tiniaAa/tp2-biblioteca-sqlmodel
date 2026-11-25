@@ -81,14 +81,6 @@ uvicorn main:app --reload
 
 ---
 
-## 🧪 Ejecutar Tests con Cobertura (≥ 90%)
-
-Para correr los tests y verificar la cobertura de todas las capas:
-
-```bash
-pytest -v --cov=models --cov=routers --cov=services --cov=repositories --cov-report=term-missing
-```
-
 ---
 
 ## 📋 Reglas de Negocio Implementadas
